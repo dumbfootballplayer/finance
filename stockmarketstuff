@@ -1,0 +1,93 @@
+//This code is in C++, efficiency is not the purpose here but functionality is. 
+
+#include <iostream>
+#include <vector>
+#include <boost/algorithm/string.hpp>
+#include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
+
+using namespace std;
+using namespace boost::asio;
+using namespace boost::asio::ssl;
+using namespace boost::algorithm;
+
+// Define the ticker symbol
+const string ticker = "AAPL";
+
+// Define the Yahoo Finance URL for the stock data
+const string yahoo_url = "https://query1.finance.yahoo.com/v7/finance/chart/" + ticker;
+
+// Define the SSL context
+ssl::context ctx(ssl::context::sslv23);
+
+// Define a function to download the stock data
+vector<double> download_stock_data() {
+    // Establish the SSL connection
+    io_service ioservice;
+    ssl::stream<ip::tcp::socket> socket(ioservice, ctx);
+    socket.lowest_layer().connect(ip::tcp::resolver(ioservice).resolve("query1.finance.yahoo.com", "https"));
+    socket.handshake(ssl::stream_base::client);
+
+    // Send the HTTP request
+    string request = "GET " + yahoo_url + " HTTP/1.1\r\n"
+                     "Host: query1.finance.yahoo.com\r\n"
+                     "User-Agent: Mozilla/5.0\r\n"
+                     "Accept: */*\r\n"
+                     "Connection: close\r\n\r\n";
+    write(socket, buffer(request));
+
+    // Read the HTTP response
+    vector<char> response_buf(4096);
+    read_until(socket, buffer(response_buf), "\r\n\r\n");
+    string response(&response_buf[0], &response_buf[0] + response_buf.size());
+    size_t body_pos = response.find("\r\n\r\n") + 4;
+
+    // Parse the JSON data
+    string data = response.substr(body_pos);
+    vector<double> prices;
+    vector<string> lines;
+    split(lines, data, is_any_of("\n"));
+    for (auto& line : lines) {
+        if (line.find("[") != string::npos && line.find("]") != string::npos) {
+            vector<string> items;
+            split(items, line, is_any_of(","));
+            for (auto& item : items) {
+                if (item.find("null") == string::npos) {
+                    double price = stod(item.substr(1, item.size() - 2));
+                    prices.push_back(price);
+                }
+            }
+        }
+    }
+    return prices;
+}
+
+// Define a function to calculate the mean and standard deviation of the stock prices
+void calculate_statistics(const vector<double>& prices, double& mean_price, double& std_price) {
+    double sum = 0.0;
+    for (auto& price : prices) {
+        sum += price;
+    }
+    mean_price = sum / prices.size();
+
+    double sq_sum = 0.0;
+    for (auto& price : prices) {
+        sq_sum += (price - mean_price) * (price - mean_price);
+    }
+    std_price = sqrt(sq_sum / prices.size());
+}
+
+// Main function
+int main() {
+    // Download the stock data
+    vector<double> prices = download_stock_data();
+
+    // Calculate the mean and standard deviation of the stock prices
+    double mean_price, std_price;
+    calculate_statistics(prices, mean_price, std_price);
+
+    // Print the results
+    cout << "Mean price of " << ticker << ": " << mean_price << endl;
+    cout << "Standard deviation of price of " << ticker << ": " << std_price << endl;
+
+    return
